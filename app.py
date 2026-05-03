@@ -213,16 +213,17 @@ with st.sidebar:
     st.markdown("### ⚙️ API Configuration")
     st.markdown("---")
 
-    groq_key = st.text_input("🔑 Groq API Key", value=st.session_state.groq_key, type="password", placeholder="gsk_...")
-    serp_key = st.text_input("🔎 SerpAPI Key", value=st.session_state.serp_key, type="password", placeholder="your_serpapi_key",
-                              help="Get free key at serpapi.com · 100 searches/month free")
+    # Key loaded from Streamlit Secrets — not shown in sidebar
+    groq_key = st.session_state.groq_key
+    serp_key = st.session_state.serp_key
 
     if groq_key: st.session_state.groq_key = groq_key
     if serp_key: st.session_state.serp_key = serp_key
 
-    status_groq = "✅ Set" if st.session_state.groq_key else "❌ Missing"
-    status_serp = "✅ Set" if st.session_state.serp_key else "⚠️ Using demo articles"
-    st.markdown(f"<small>Groq: {status_groq} · SerpAPI: {status_serp}</small>", unsafe_allow_html=True)
+    if st.session_state.groq_key and st.session_state.serp_key:
+        st.markdown('<div style="background:rgba(52,211,153,0.1);border:1px solid rgba(52,211,153,0.3);border-radius:8px;padding:7px 10px;font-size:12px;color:#34d399">🔒 Both API Keys: Secured via Streamlit Secrets</div>', unsafe_allow_html=True)
+    else:
+        st.markdown('<div style="background:rgba(248,113,113,0.1);border:1px solid rgba(248,113,113,0.3);border-radius:8px;padding:7px 10px;font-size:12px;color:#f87171">⚠️ Add API keys to Streamlit Secrets</div>', unsafe_allow_html=True)
 
     st.markdown("---")
     st.markdown("### ✍️ Blog Settings")
