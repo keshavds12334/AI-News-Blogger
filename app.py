@@ -100,7 +100,7 @@ for k, v in [('articles',None),('blog_post',None),('email_draft',None),
         st.session_state[k] = v
 
 # ── Groq LLM Call ─────────────────────────────────────────────────
-def call_groq(system: str, user: str, api_key: str, model="llama-3.1-70b-versatile", max_tokens=2048) -> str:
+def call_groq(system: str, user: str, api_key: str, model="llama-3.3-70b-versatile", max_tokens=2048) -> str:
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     payload = {
         "model": model,
