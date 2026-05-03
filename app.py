@@ -100,7 +100,7 @@ for k, v in [('articles',None),('blog_post',None),('email_draft',None),
         st.session_state[k] = v
 
 # ── Groq LLM Call ─────────────────────────────────────────────────
-def call_groq(system: str, user: str, api_key: str, model="llama3-70b-8192", max_tokens=2048) -> str:
+def call_groq(system: str, user: str, api_key: str, model="llama-3.1-70b-versatile", max_tokens=2048) -> str:
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     payload = {
         "model": model,
@@ -110,7 +110,13 @@ def call_groq(system: str, user: str, api_key: str, model="llama3-70b-8192", max
     try:
         r = requests.post("https://api.groq.com/openai/v1/chat/completions",
                           headers=headers, json=payload, timeout=40)
-        r.raise_for_status()
+        if r.status_code != 200:
+            try:
+                err_body = r.json()
+                err_msg = err_body.get("error", {}).get("message", r.text)
+            except:
+                err_msg = r.text
+            return f"ERROR {r.status_code}: {err_msg}"
         return r.json()["choices"][0]["message"]["content"]
     except Exception as e:
         return f"ERROR: {str(e)}"
