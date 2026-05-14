@@ -93,9 +93,9 @@ div[data-testid="stSidebar"] { background: #fafaf9; border-right: 1px solid #e7e
 """, unsafe_allow_html=True)
 
 # ── Session State ─────────────────────────────────────────────────
-for k, v in [('articles',None),('blog_post',None),('email_draft',None),
-               ('groq_key', st.secrets.get('GROQ_API_KEY','')),
-               ('serp_key', st.secrets.get('SERP_API_KEY',''))]:
+for k, v in [('articles', None), ('blog_post', None), ('email_draft', None),
+             ('groq_key', st.secrets.get('GROQ_API_KEY', '')),
+             ('serp_key', st.secrets.get('SERP_API_KEY', ''))]:
     if k not in st.session_state:
         st.session_state[k] = v
 
@@ -104,7 +104,7 @@ def call_groq(system: str, user: str, api_key: str, model="llama-3.3-70b-versati
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     payload = {
         "model": model,
-        "messages": [{"role":"system","content":system}, {"role":"user","content":user}],
+        "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
         "max_tokens": max_tokens, "temperature": 0.7
     }
     try:
@@ -121,35 +121,97 @@ def call_groq(system: str, user: str, api_key: str, model="llama-3.3-70b-versati
     except Exception as e:
         return f"ERROR: {str(e)}"
 
-# ── SerpAPI News Fetch ────────────────────────────────────────────
+# ── SerpAPI News Fetch (FIXED) ────────────────────────────────────
 def fetch_ai_news(query: str, serp_key: str, num: int = 6) -> list:
+    """
+    PRIMARY: tries tbm=nws (Google News tab)
+    FALLBACK: tries engine=google_news  (SerpAPI's dedicated news engine)
+    """
+    # --- attempt 1: standard Google News tab ---
     url = "https://serpapi.com/search"
-    params = {"q": query, "tbm": "nws", "num": num,
-               "api_key": serp_key, "hl": "en", "gl": "us"}
+    params = {
+        "q": query,
+        "tbm": "nws",
+        "num": num,
+        "api_key": serp_key,
+        "hl": "en",
+        "gl": "us"
+    }
     try:
         r = requests.get(url, params=params, timeout=15)
         r.raise_for_status()
-        results = r.json().get("news_results", [])
-        articles = []
-        for item in results[:num]:
-            articles.append({
-                "title":   item.get("title", ""),
-                "snippet": item.get("snippet", ""),
-                "source":  item.get("source", ""),
-                "date":    item.get("date", ""),
-                "link":    item.get("link", "")
-            })
-        return articles
+        raw = r.json()
+        results = raw.get("news_results", [])
+
+        # ── DEBUG: expose raw keys so you can see what SerpAPI actually returned ──
+        st.session_state['_serp_debug'] = {
+            "attempt": "tbm=nws",
+            "status": r.status_code,
+            "top_keys": list(raw.keys()),
+            "news_count": len(results),
+            "error": raw.get("error", None)
+        }
+
+        if results:
+            articles = []
+            for item in results[:num]:
+                articles.append({
+                    "title":   item.get("title", ""),
+                    "snippet": item.get("snippet", ""),
+                    "source":  item.get("source", ""),
+                    "date":    item.get("date", ""),
+                    "link":    item.get("link", "")
+                })
+            return articles
+
+        # --- attempt 2: dedicated google_news engine ---
+        params2 = {
+            "engine": "google_news",
+            "q": query,
+            "api_key": serp_key,
+            "hl": "en",
+            "gl": "us"
+        }
+        r2 = requests.get(url, params=params2, timeout=15)
+        r2.raise_for_status()
+        raw2 = r2.json()
+        results2 = raw2.get("news_results", [])
+
+        st.session_state['_serp_debug']['attempt2'] = {
+            "engine": "google_news",
+            "top_keys": list(raw2.keys()),
+            "news_count": len(results2),
+            "error": raw2.get("error", None)
+        }
+
+        if results2:
+            articles = []
+            for item in results2[:num]:
+                # google_news engine nests stories differently
+                stories = item.get("stories", [item])
+                for s in stories[:1]:
+                    articles.append({
+                        "title":   s.get("title", item.get("title", "")),
+                        "snippet": s.get("snippet", item.get("snippet", "")),
+                        "source":  s.get("source", {}).get("name", item.get("source", "")),
+                        "date":    s.get("date", item.get("date", "")),
+                        "link":    s.get("link", item.get("link", ""))
+                    })
+            return articles if articles else [{"error": "SerpAPI returned 0 articles on both attempts — using demo data."}]
+
+        return [{"error": "SerpAPI returned 0 articles on both attempts — using demo data."}]
+
     except Exception as e:
+        st.session_state['_serp_debug'] = {"exception": str(e)}
         return [{"error": str(e)}]
 
-# ── Demo Articles (when no API key) ──────────────────────────────
+# ── Demo Articles ─────────────────────────────────────────────────
 DEMO_ARTICLES = [
-    {"title":"GPT-5 Rumoured to Launch With Real-Time Multimodal Reasoning","snippet":"OpenAI's next flagship model is expected to feature dramatically improved reasoning capabilities and native multimodal understanding, according to industry sources familiar with the project.","source":"TechCrunch","date":"2 hours ago","link":"#"},
-    {"title":"Google DeepMind Releases Gemini 2.0 Ultra — Beats All Benchmarks","snippet":"Google's DeepMind division has released Gemini 2.0 Ultra, claiming state-of-the-art performance on 28 out of 32 industry benchmarks including coding, mathematics, and scientific reasoning.","source":"The Verge","date":"4 hours ago","link":"#"},
-    {"title":"Meta Announces Open-Source LLaMA 4 with 400B Parameters","snippet":"Meta has announced LLaMA 4, its largest open-source model yet, promising performance competitive with proprietary models while remaining freely available for research and commercial use.","source":"Wired","date":"6 hours ago","link":"#"},
-    {"title":"AI Agents Are Replacing Software Engineers at 12% of Fortune 500 Companies","snippet":"A new McKinsey survey finds that 12% of Fortune 500 companies are now using AI coding agents to handle routine software development tasks, raising new questions about the future of tech employment.","source":"Bloomberg","date":"8 hours ago","link":"#"},
-    {"title":"Anthropic Raises $4B in New Funding Round — Valuation Hits $61.5B","snippet":"Anthropic, the AI safety company behind Claude, has secured another $4 billion in funding led by Google, pushing its valuation to $61.5 billion as competition in the AI industry intensifies.","source":"Reuters","date":"10 hours ago","link":"#"},
+    {"title": "GPT-5 Rumoured to Launch With Real-Time Multimodal Reasoning", "snippet": "OpenAI's next flagship model is expected to feature dramatically improved reasoning capabilities and native multimodal understanding, according to industry sources familiar with the project.", "source": "TechCrunch", "date": "2 hours ago", "link": "#"},
+    {"title": "Google DeepMind Releases Gemini 2.0 Ultra — Beats All Benchmarks", "snippet": "Google's DeepMind division has released Gemini 2.0 Ultra, claiming state-of-the-art performance on 28 out of 32 industry benchmarks including coding, mathematics, and scientific reasoning.", "source": "The Verge", "date": "4 hours ago", "link": "#"},
+    {"title": "Meta Announces Open-Source LLaMA 4 with 400B Parameters", "snippet": "Meta has announced LLaMA 4, its largest open-source model yet, promising performance competitive with proprietary models while remaining freely available for research and commercial use.", "source": "Wired", "date": "6 hours ago", "link": "#"},
+    {"title": "AI Agents Are Replacing Software Engineers at 12% of Fortune 500 Companies", "snippet": "A new McKinsey survey finds that 12% of Fortune 500 companies are now using AI coding agents to handle routine software development tasks, raising new questions about the future of tech employment.", "source": "Bloomberg", "date": "8 hours ago", "link": "#"},
+    {"title": "Anthropic Raises $4B in New Funding Round — Valuation Hits $61.5B", "snippet": "Anthropic, the AI safety company behind Claude, has secured another $4 billion in funding led by Google, pushing its valuation to $61.5 billion as competition in the AI industry intensifies.", "source": "Reuters", "date": "10 hours ago", "link": "#"},
 ]
 
 # ── Summarise Articles ────────────────────────────────────────────
@@ -164,7 +226,7 @@ def summarise_articles(articles: list, api_key: str) -> str:
 
 # ── Generate Blog Post ────────────────────────────────────────────
 def generate_blog(articles: list, topic: str, tone: str, api_key: str) -> dict:
-    combined = "\n\n".join([f"[{i+1}] {a['title']}\n{a['snippet']}" for i,a in enumerate(articles) if 'error' not in a])
+    combined = "\n\n".join([f"[{i+1}] {a['title']}\n{a['snippet']}" for i, a in enumerate(articles) if 'error' not in a])
     system = f"""You are an expert AI technology blogger who writes engaging, well-structured blog posts.
 Write in a {tone} tone. The blog must have:
 - A compelling title
@@ -189,16 +251,15 @@ Based on these recent AI news articles, write a comprehensive blog post:
     except:
         pass
 
-    # Fallback: parse manually
     lines   = raw.strip().split('\n')
-    title   = lines[0].replace('#','').strip() if lines else "AI Weekly Roundup"
+    title   = lines[0].replace('#', '').strip() if lines else "AI Weekly Roundup"
     content = '\n'.join(lines[1:]) if len(lines) > 1 else raw
-    return {"title": title, "content": content, "tags": ["AI","Technology","Weekly"], "summary": content[:200]}
+    return {"title": title, "content": content, "tags": ["AI", "Technology", "Weekly"], "summary": content[:200]}
 
 # ── Generate Email ────────────────────────────────────────────────
 def generate_email(blog: dict, recipient: str, sender: str, api_key: str) -> dict:
     system = "You are an expert email marketer. Write a professional newsletter email to share a blog post. Include subject line, preview text, and email body. Return JSON with keys: subject, preview, body"
-    user   = f"Blog title: {blog['title']}\nBlog summary: {blog.get('summary','')}\nRecipient: {recipient}\nSender: {sender}"
+    user   = f"Blog title: {blog['title']}\nBlog summary: {blog.get('summary', '')}\nRecipient: {recipient}\nSender: {sender}"
     raw    = call_groq(system, user, api_key, max_tokens=800)
     try:
         match = re.search(r'\{.*\}', raw, re.DOTALL)
@@ -206,29 +267,29 @@ def generate_email(blog: dict, recipient: str, sender: str, api_key: str) -> dic
             return json.loads(match.group())
     except:
         pass
-    return {"subject": f"📰 {blog['title']}", "preview": blog.get('summary','')[:100], "body": raw}
+    return {"subject": f"📰 {blog['title']}", "preview": blog.get('summary', '')[:100], "body": raw}
 
 # ── SIDEBAR ───────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("### ⚙️ API Configuration")
     st.markdown("---")
 
-    # Key loaded from Streamlit Secrets — not shown in sidebar
     groq_key = st.session_state.groq_key
     serp_key = st.session_state.serp_key
 
-    if groq_key: st.session_state.groq_key = groq_key
-    if serp_key: st.session_state.serp_key = serp_key
-
     if st.session_state.groq_key and st.session_state.serp_key:
         st.markdown('<div style="background:rgba(52,211,153,0.1);border:1px solid rgba(52,211,153,0.3);border-radius:8px;padding:7px 10px;font-size:12px;color:#34d399">🔒 Both API Keys: Secured via Streamlit Secrets</div>', unsafe_allow_html=True)
+    elif st.session_state.groq_key:
+        st.markdown('<div style="background:rgba(251,191,36,0.1);border:1px solid rgba(251,191,36,0.3);border-radius:8px;padding:7px 10px;font-size:12px;color:#fbbf24">⚠️ Only Groq key found — SerpAPI key missing</div>', unsafe_allow_html=True)
+    elif st.session_state.serp_key:
+        st.markdown('<div style="background:rgba(251,191,36,0.1);border:1px solid rgba(251,191,36,0.3);border-radius:8px;padding:7px 10px;font-size:12px;color:#fbbf24">⚠️ Only SerpAPI key found — Groq key missing</div>', unsafe_allow_html=True)
     else:
-        st.markdown('<div style="background:rgba(248,113,113,0.1);border:1px solid rgba(248,113,113,0.3);border-radius:8px;padding:7px 10px;font-size:12px;color:#f87171">⚠️ Add API keys to Streamlit Secrets</div>', unsafe_allow_html=True)
+        st.markdown('<div style="background:rgba(248,113,113,0.1);border:1px solid rgba(248,113,113,0.3);border-radius:8px;padding:7px 10px;font-size:12px;color:#f87171">⚠️ No API keys found in Streamlit Secrets</div>', unsafe_allow_html=True)
 
     st.markdown("---")
     st.markdown("### ✍️ Blog Settings")
     topic  = st.text_input("Topic / Search Query", value="artificial intelligence latest news 2025")
-    tone   = st.selectbox("Writing Tone", ["Professional","Casual and friendly","Technical","Enthusiastic"])
+    tone   = st.selectbox("Writing Tone", ["Professional", "Casual and friendly", "Technical", "Enthusiastic"])
     n_arts = st.slider("Number of articles to fetch", 3, 8, 5)
 
     st.markdown("---")
@@ -266,27 +327,35 @@ st.markdown("""
 
 # ── STEP 1: FETCH NEWS ────────────────────────────────────────────
 st.markdown("## Step 1 — Fetch Latest AI News")
-col_fetch, col_demo = st.columns([2,1])
+col_fetch, col_demo = st.columns([2, 1])
 
 with col_fetch:
     fetch_btn = st.button("🔎 Fetch AI News", use_container_width=True)
 
 with col_demo:
-    demo_btn  = st.button("📋 Use Demo Articles (no SerpAPI key needed)", use_container_width=True)
+    demo_btn = st.button("📋 Use Demo Articles (no SerpAPI key needed)", use_container_width=True)
 
 if fetch_btn:
     if not st.session_state.serp_key:
-        st.warning("No SerpAPI key — loading demo articles instead.")
+        st.warning("No SerpAPI key found in Secrets — loading demo articles instead.")
         st.session_state.articles = DEMO_ARTICLES
     else:
         with st.spinner("Fetching latest AI news from SerpAPI..."):
             arts = fetch_ai_news(topic, st.session_state.serp_key, n_arts)
-            if arts and 'error' in arts[0]:
-                st.error(f"SerpAPI error: {arts[0]['error']} — using demo articles")
-                st.session_state.articles = DEMO_ARTICLES
-            else:
-                st.session_state.articles = arts
-                st.success(f"✅ Fetched {len(arts)} articles!")
+
+        # ── Show debug info so you know exactly what happened ──
+        if '_serp_debug' in st.session_state:
+            with st.expander("🔍 SerpAPI Debug Info (click to expand)", expanded=True):
+                st.json(st.session_state['_serp_debug'])
+
+        if not arts or 'error' in arts[0]:
+            err_msg = arts[0].get('error', 'Unknown error') if arts else 'No results'
+            st.warning(f"⚠️ SerpAPI issue: {err_msg}\n\nLoading demo articles instead.")
+            st.session_state.articles = DEMO_ARTICLES
+        else:
+            st.session_state.articles = arts
+            st.success(f"✅ Fetched {len(arts)} articles!")
+
     st.session_state.blog_post   = None
     st.session_state.email_draft = None
 
@@ -300,21 +369,22 @@ if demo_btn:
 if st.session_state.articles:
     arts = st.session_state.articles
 
-    c1,c2,c3 = st.columns(3)
-    for col, val, lab in zip([c1,c2,c3],
-        [str(len(arts)), len(set(a.get('source','') for a in arts)), "AI / Tech"],
-        ["Articles","Sources","Category"]):
+    c1, c2, c3 = st.columns(3)
+    for col, val, lab in zip([c1, c2, c3],
+        [str(len(arts)), len(set(a.get('source', '') for a in arts if 'error' not in a)), "AI / Tech"],
+        ["Articles", "Sources", "Category"]):
         with col:
             st.markdown(f'<div class="stat-card"><div class="stat-val">{val}</div><div class="stat-lab">{lab}</div></div>', unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
     for i, art in enumerate(arts):
-        if 'error' in art: continue
+        if 'error' in art:
+            continue
         st.markdown(f"""<div class="news-card">
-            <div class="news-tag">AI NEWS · {art.get('source','Unknown')}</div>
-            <div class="news-title">{art.get('title','')}</div>
-            <div class="news-meta">🕐 {art.get('date','Recent')} · {art.get('source','')}</div>
-            <div class="news-body">{art.get('snippet','')}</div>
+            <div class="news-tag">AI NEWS · {art.get('source', 'Unknown')}</div>
+            <div class="news-title">{art.get('title', '')}</div>
+            <div class="news-meta">🕐 {art.get('date', 'Recent')} · {art.get('source', '')}</div>
+            <div class="news-body">{art.get('snippet', '')}</div>
         </div>""", unsafe_allow_html=True)
 
     # ── STEP 2: GENERATE BLOG ──────────────────────────────────────
@@ -325,23 +395,25 @@ if st.session_state.articles:
 
     if gen_btn:
         if not st.session_state.groq_key:
-            st.error("⚠️ Please enter your Groq API key in the sidebar.")
+            st.error("⚠️ GROQ_API_KEY not found in Streamlit Secrets.")
         else:
             with st.spinner("🧠 Groq LLaMA 3 is writing your blog post..."):
                 blog = generate_blog(arts, topic, tone, st.session_state.groq_key)
                 st.session_state.blog_post   = blog
                 st.session_state.email_draft = None
-            st.success("✅ Blog post generated!")
+            if str(blog.get('title', '')).startswith('ERROR') or str(blog.get('content', '')).startswith('ERROR'):
+                st.error(f"Groq API error: {blog.get('content', blog.get('title', ''))}")
+            else:
+                st.success("✅ Blog post generated!")
 
     if st.session_state.blog_post:
         blog = st.session_state.blog_post
 
         st.markdown('<div class="blog-post">', unsafe_allow_html=True)
-        st.markdown(f'<div class="blog-title">{blog.get("title","AI Weekly Roundup")}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="blog-title">{blog.get("title", "AI Weekly Roundup")}</div>', unsafe_allow_html=True)
         st.markdown(f'<div class="blog-meta">📅 {datetime.now().strftime("%B %d, %Y")} · ✍️ AI Auto-Generated · 🤖 Powered by Groq LLaMA 3</div>', unsafe_allow_html=True)
 
-        content = blog.get("content","")
-        # Render headers
+        content = blog.get("content", "")
         rendered = ""
         for line in content.split('\n'):
             if line.startswith('## '):
@@ -353,7 +425,7 @@ if st.session_state.articles:
 
         st.markdown(f'<div class="blog-body">{rendered}</div>', unsafe_allow_html=True)
 
-        tags = blog.get("tags", ["AI","Technology"])
+        tags = blog.get("tags", ["AI", "Technology"])
         if isinstance(tags, list):
             tags_html = " ".join([f'<span class="blog-tag">#{t}</span>' for t in tags])
         else:
@@ -369,7 +441,7 @@ if st.session_state.articles:
 
         if email_btn:
             if not st.session_state.groq_key:
-                st.error("⚠️ Please enter your Groq API key.")
+                st.error("⚠️ GROQ_API_KEY not found in Streamlit Secrets.")
             else:
                 with st.spinner("📧 Formatting email..."):
                     email = generate_email(blog, recipient, sender, st.session_state.groq_key)
@@ -390,23 +462,22 @@ if st.session_state.articles:
 
             for lab, val in [("From:", f"{sender} <newsletter@ai-weekly.com>"),
                               ("To:", f"{recipient}"),
-                              ("Subject:", email.get("subject","AI Weekly Newsletter")),
-                              ("Preview:", email.get("preview","")[:100])]:
+                              ("Subject:", email.get("subject", "AI Weekly Newsletter")),
+                              ("Preview:", email.get("preview", "")[:100])]:
                 st.markdown(f'<div class="email-field"><div class="email-label">{lab}</div><div class="email-val">{val}</div></div>', unsafe_allow_html=True)
 
-            body = email.get("body","")
+            body = email.get("body", "")
             st.markdown(f'<div class="email-body-box">{body}</div>', unsafe_allow_html=True)
             st.markdown('</div>', unsafe_allow_html=True)
 
-            # Download buttons
             st.markdown("<br>", unsafe_allow_html=True)
             dl1, dl2 = st.columns(2)
             with dl1:
                 st.download_button("📥 Download Blog Post (.txt)",
-                                   data=f"{blog.get('title','')}\n\n{blog.get('content','')}",
+                                   data=f"{blog.get('title', '')}\n\n{blog.get('content', '')}",
                                    file_name="blog_post.txt", use_container_width=True)
             with dl2:
-                email_txt = f"Subject: {email.get('subject','')}\n\n{email.get('body','')}"
+                email_txt = f"Subject: {email.get('subject', '')}\n\n{email.get('body', '')}"
                 st.download_button("📥 Download Email Draft (.txt)",
                                    data=email_txt,
                                    file_name="email_draft.txt", use_container_width=True)
